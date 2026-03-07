@@ -64,7 +64,12 @@ class BenchmarkMetricsCallback(keras.callbacks.Callback):
 def fit(model, dataset, start_batch=None):
     start_batch = (benchmark.NUM_STEPS // 10) if start_batch is None else start_batch
     callback = BenchmarkMetricsCallback(start_batch=start_batch)
-    model.fit(dataset, epochs=1, callbacks=[callback])
+    model.fit(
+        dataset,
+        epochs=1,
+        steps_per_epoch=benchmark.NUM_STEPS,
+        callbacks=[callback]
+    )
     return 1000.0 * callback.time_per_step
 
 
