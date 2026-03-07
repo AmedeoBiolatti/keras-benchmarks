@@ -278,23 +278,25 @@ def main() -> None:
     all_results: list[RunResult] = []
     for spec in specs:
         name = f"{spec.label}_spe{spec.steps_per_execution}_rep{spec.rep}"
+        config = {
+            "label": spec.label,
+            "rep": spec.rep,
+            "steps_per_execution": spec.steps_per_execution,
+            "python_exe": spec.python_exe,
+            "bench_script": spec.bench_script,
+            "backend": args.backend,
+            "repo_root": args.repo_root,
+        }
         if spec.batch_size is not None:
             name += f"_bs{spec.batch_size}"
+            config["batch_size"] = spec.batch_size
         wb_run = wandb.init(
             project=args.wandb_project,
             entity=args.wandb_entity,
             group=args.wandb_group,
             job_type="benchmark",
             name=name,
-            config={
-                "label": spec.label,
-                "rep": spec.rep,
-                "steps_per_execution": spec.steps_per_execution,
-                "python_exe": spec.python_exe,
-                "bench_script": spec.bench_script,
-                "backend": args.backend,
-                "repo_root": args.repo_root,
-            },
+            config=config,
             reinit=True,
         )
         result = run_one(
