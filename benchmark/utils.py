@@ -7,10 +7,9 @@ import benchmark
 
 
 class BenchmarkMetricsCallback(keras.callbacks.Callback):
-    def __init__(self, start_batch=1, stop_batch=None):
+    def __init__(self, start_batch=1):
         super().__init__()
         self.start_batch = start_batch
-        self.stop_batch = stop_batch
         self.state = {}
         self.last_batch = None
         self.time_per_step = None
@@ -50,14 +49,16 @@ class BenchmarkMetricsCallback(keras.callbacks.Callback):
         self._maybe_finalize(batch=None)
 
 
-def fit(model, dataset):
-    callback = BenchmarkMetricsCallback(stop_batch=benchmark.NUM_STEPS)
+def fit(model, dataset, start_batch=None):
+    start_batch = (benchmark.NUM_STEPS // 10) if start_batch is None else start_batch
+    callback = BenchmarkMetricsCallback(start_batch=start_batch)
     model.fit(dataset, epochs=1, callbacks=[callback])
     return 1000.0 * callback.time_per_step
 
 
-def predict(model, dataset):
-    callback = BenchmarkMetricsCallback(stop_batch=benchmark.NUM_STEPS)
+def predict(model, dataset, start_batch=None):
+    start_batch = (benchmark.NUM_STEPS // 10) if start_batch is None else start_batch
+    callback = BenchmarkMetricsCallback(start_batch=start_batch)
     model.predict(dataset, callbacks=[callback])
     return 1000.0 * callback.time_per_step
 

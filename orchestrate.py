@@ -54,11 +54,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--backend", default="jax")
     parser.add_argument("--timeout-s", type=int, default=0)
     parser.add_argument("--shuffle", action="store_true")
+    parser.add_argument("--shuffle-seed", type=int, default=42)
 
     parser.add_argument("--wandb-project", required=True)
     parser.add_argument("--wandb-entity", default=None)
     parser.add_argument("--wandb-run-name", default=None)
     parser.add_argument("--wandb-tags", default="")
+    parser.add_argument("--wandb-group", default="benchmark")
 
     return parser.parse_args()
 
@@ -149,11 +151,11 @@ def make_env(backend: str, steps_per_execution: int, repo_root: str) -> dict[str
 
 
 def run_one(
-    spec: RunSpec,
-    backend: str,
-    repo_root: str,
-    output_dir: Path,
-    timeout_s: int | None,
+        spec: RunSpec,
+        backend: str,
+        repo_root: str,
+        output_dir: Path,
+        timeout_s: int | None,
 ) -> RunResult:
     output_dir.mkdir(parents=True, exist_ok=True)
     log_dir = output_dir / "logs"
@@ -237,51 +239,72 @@ def main() -> None:
 
     timeout_s = None if args.timeout_s <= 0 else args.timeout_s
 
+    rng = random.Random(args.shuffle_seed)
     specs: list[RunSpec] = []
-    for spe in spe_values:
-        for rep in range(args.reps):
-            specs.append(
+
+    for rep in range(args.reps):
+        rep_spe = list(spe_values)
+        if args.shuffle:
+            rng.shuffle(rep_spe)
+
+        for spe in rep_spe:
+            pair = [
                 RunSpec(
                     label="baseline",
                     python_exe=args.baseline_python,
                     bench_script=args.bench_script,
                     rep=rep,
                     steps_per_execution=spe,
-                )
-            )
-            specs.append(
+                ),
                 RunSpec(
                     label="branch",
                     python_exe=args.branch_python,
                     bench_script=args.bench_script,
                     rep=rep,
                     steps_per_execution=spe,
-                )
-            )
+                ),
+            ]
+            if args.shuffle:
+                rng.shuffle(pair)
+            specs.extend(pair)
 
-    if args.shuffle:
-        random.shuffle(specs)
-
-    run = wandb.init(
-        project=args.wandb_project,
-        entity=args.wandb_entity,
-        name=args.wandb_run_name,
-        tags=[x for x in args.wandb_tags.split(",") if x],
-        config={
-            "baseline_python": args.baseline_python,
-            "branch_python": args.branch_python,
-            "bench_script": args.bench_script,
-            "repo_root": str(Path(args.repo_root).resolve()),
-            "backend": args.backend,
-            "reps": args.reps,
-            "steps_per_execution": spe_values,
-            "shuffle": args.shuffle,
-        },
-    )
+    # run = wandb.init(
+    #     project=args.wandb_project,
+    #     entity=args.wandb_entity,
+    #     name=args.wandb_run_name,
+    #     tags=[x for x in args.wandb_tags.split(",") if x],
+    #     config={
+    #         "baseline_python": args.baseline_python,
+    #         "branch_python": args.branch_python,
+    #         "bench_script": args.bench_script,
+    #         "repo_root": str(Path(args.repo_root).resolve()),
+    #         "backend": args.backend,
+    #         "reps": args.reps,
+    #         "steps_per_execution": spe_values,
+    #         "shuffle": args.shuffle,
+    #         "shuffle_seed": args.shuffle_seed,
+    #     },
+    # )
 
     all_results: list[RunResult] = []
-
     for spec in specs:
+        wb_run = wandb.init(
+            project=args.wandb_project,
+            entity=args.wandb_entity,
+            group=args.wandb_group,
+            job_type="benchmark",
+            name=f"{spec.label}_spe{spec.steps_per_execution}_rep{spec.rep}",
+            config={
+                "label": spec.label,
+                "rep": spec.rep,
+                "steps_per_execution": spec.steps_per_execution,
+                "python_exe": spec.python_exe,
+                "bench_script": spec.bench_script,
+                "backend": args.backend,
+                "repo_root": args.repo_root,
+            },
+            reinit=True,
+        )
         result = run_one(
             spec=spec,
             backend=args.backend,
@@ -314,6 +337,7 @@ def main() -> None:
                 "ms_per_step": result.ms_per_step if result.ms_per_step is not None else math.nan,
             }
         )
+        wb_run.finish()
 
     summary_payload: dict[str, Any] = {}
 
@@ -340,14 +364,6 @@ def main() -> None:
         if baseline_stats["n"] > 0 and branch_stats["n"] > 0:
             summary_payload[f"speedup/spe_{spe}/median"] = baseline_stats["median"] / branch_stats["median"]
             summary_payload[f"speedup/spe_{spe}/mean"] = baseline_stats["mean"] / branch_stats["mean"]
-
-    wandb.log(summary_payload)
-
-    run.summary["jsonl_path"] = str(jsonl_path)
-    run.summary["logs_dir"] = str(output_dir / "logs")
-    run.summary["num_runs"] = len(all_results)
-    run.summary["num_success"] = sum(int(r.ok) for r in all_results)
-    run.finish()
 
     print(
         json.dumps(
