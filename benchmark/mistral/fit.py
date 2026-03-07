@@ -32,6 +32,7 @@ def run(batch_size=benchmark.MISTRAL_FIT_BATCH_SIZE):
         loss=keras.losses.SparseCategoricalCrossentropy(from_logits=True),
         optimizer=keras.optimizers.AdamW(),
         jit_compile=utils.use_jit(),
+        steps_per_execution=utils.steps_per_execution(),
     )
     return utils.fit(model, dataset)
 

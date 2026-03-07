@@ -28,7 +28,11 @@ def run(batch_size=benchmark.SD_FIT_BATCH_SIZE):
     backbone = keras.Model(
         model.image_encoder.inputs, model.image_encoder.layers[-3].output
     )
-    backbone.compile(loss="mse", optimizer="adam")
+    backbone.compile(
+        loss="mse",
+        optimizer="adam",
+        steps_per_execution=utils.steps_per_execution(),
+    )
     return utils.fit(backbone, train_dataset)
 
 

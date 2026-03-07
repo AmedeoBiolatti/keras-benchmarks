@@ -27,7 +27,10 @@ def run(batch_size=benchmark.SAM_FIT_BATCH_SIZE):
     model = keras_cv.models.SegmentAnythingModel.from_preset("sam_huge_sa1b")
     backbone = model.backbone
     backbone.compile(
-        loss="mse", optimizer="adam", jit_compile=utils.use_jit()
+        loss="mse",
+        optimizer="adam",
+        jit_compile=utils.use_jit(),
+        steps_per_execution=utils.steps_per_execution(),
     )
     return utils.fit(backbone, train_dataset)
 

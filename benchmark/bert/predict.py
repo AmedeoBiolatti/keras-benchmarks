@@ -20,6 +20,7 @@ def run(batch_size=benchmark.BERT_BATCH_SIZE):
     )
     model.compile(
         jit_compile=utils.use_jit(),
+        steps_per_execution=utils.steps_per_execution(),
     )
 
     return utils.predict(model, dataset)

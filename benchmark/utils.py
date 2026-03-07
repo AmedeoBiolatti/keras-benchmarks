@@ -79,6 +79,11 @@ def use_jit():
     )
 
 
+def steps_per_execution():
+    import os
+    return int(os.environ.get("KERAS_STEPS_PER_EXECUTION", 1))
+
+
 def get_train_dataset_for_text_classification(
     preprocessor, batch_size, seq_len
 ):
