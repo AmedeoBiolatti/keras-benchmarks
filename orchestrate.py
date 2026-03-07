@@ -11,7 +11,7 @@ import subprocess
 import time
 from dataclasses import dataclass, asdict
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 import wandb
 
@@ -25,6 +25,7 @@ class RunSpec:
     bench_script: str
     rep: int
     steps_per_execution: int
+    batch_size: Optional[int] = None
 
 
 @dataclass
@@ -61,6 +62,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--wandb-run-name", default=None)
     parser.add_argument("--wandb-tags", default="")
     parser.add_argument("--wandb-group", default="benchmark")
+
+    parser.add_argument("--batch-size", type=int, default=None)
 
     return parser.parse_args()
 
@@ -172,6 +175,8 @@ def run_one(
         bench_module,
         str(bench_out),
     ]
+    if spec.batch_size is not None:
+        cmd.append(str(spec.batch_size))
 
     env = make_env(
         backend=backend,
@@ -255,6 +260,7 @@ def main() -> None:
                     bench_script=args.bench_script,
                     rep=rep,
                     steps_per_execution=spe,
+                    batch_size=args.batch_size
                 ),
                 RunSpec(
                     label="branch",
@@ -262,38 +268,24 @@ def main() -> None:
                     bench_script=args.bench_script,
                     rep=rep,
                     steps_per_execution=spe,
+                    batch_size=args.batch_size
                 ),
             ]
             if args.shuffle:
                 rng.shuffle(pair)
             specs.extend(pair)
 
-    # run = wandb.init(
-    #     project=args.wandb_project,
-    #     entity=args.wandb_entity,
-    #     name=args.wandb_run_name,
-    #     tags=[x for x in args.wandb_tags.split(",") if x],
-    #     config={
-    #         "baseline_python": args.baseline_python,
-    #         "branch_python": args.branch_python,
-    #         "bench_script": args.bench_script,
-    #         "repo_root": str(Path(args.repo_root).resolve()),
-    #         "backend": args.backend,
-    #         "reps": args.reps,
-    #         "steps_per_execution": spe_values,
-    #         "shuffle": args.shuffle,
-    #         "shuffle_seed": args.shuffle_seed,
-    #     },
-    # )
-
     all_results: list[RunResult] = []
     for spec in specs:
+        name = f"{spec.label}_spe{spec.steps_per_execution}_rep{spec.rep}"
+        if spec.batch_size is not None:
+            name += f"_bs{spec.batch_size}"
         wb_run = wandb.init(
             project=args.wandb_project,
             entity=args.wandb_entity,
             group=args.wandb_group,
             job_type="benchmark",
-            name=f"{spec.label}_spe{spec.steps_per_execution}_rep{spec.rep}",
+            name=name,
             config={
                 "label": spec.label,
                 "rep": spec.rep,
