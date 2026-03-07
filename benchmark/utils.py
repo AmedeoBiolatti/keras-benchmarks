@@ -15,7 +15,7 @@ class BenchmarkMetricsCallback(keras.callbacks.Callback):
         self.time_per_step = None
 
     def _maybe_finalize(self, batch):
-        if batch:
+        if batch is not None:
             self.last_batch = batch
         if "benchmark_begin" not in self.state:
             return
@@ -26,24 +26,36 @@ class BenchmarkMetricsCallback(keras.callbacks.Callback):
                 self.state["benchmark_end"] - self.state["benchmark_begin"]
             ) / num_steps
 
+    # train
+    def on_train_begin(self, logs=None):
+        self.state = {}
+        self.last_batch = None
+        self.time_per_step = None
+
     def on_train_batch_begin(self, batch, logs=None):
-        if batch >= self.start_batch:
+        if batch >= self.start_batch and "benchmark_begin" not in self.state:
             self.state["actual_start_batch"] = batch
             self.state["benchmark_begin"] = time.time()
 
     def on_train_batch_end(self, batch, logs=None):
         self._maybe_finalize(batch)
 
+    def on_train_end(self, logs=None):
+        self._maybe_finalize(batch=None)
+
+    # predict
+    def on_predict_begin(self, logs=None):
+        self.state = {}
+        self.last_batch = None
+        self.time_per_step = None
+
     def on_predict_batch_begin(self, batch, logs=None):
-        if batch >= self.start_batch:
+        if batch >= self.start_batch and "benchmark_begin" not in self.state:
             self.state["actual_start_batch"] = batch
             self.state["benchmark_begin"] = time.time()
 
     def on_predict_batch_end(self, batch, logs=None):
         self._maybe_finalize(batch)
-
-    def on_train_end(self, logs=None):
-        self._maybe_finalize(batch=None)
 
     def on_predict_end(self, logs=None):
         self._maybe_finalize(batch=None)
