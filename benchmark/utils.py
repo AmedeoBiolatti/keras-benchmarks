@@ -16,48 +16,38 @@ class BenchmarkMetricsCallback(keras.callbacks.Callback):
         self.time_per_step = None
 
     def _maybe_finalize(self, batch):
-        self.last_batch = batch
+        if batch:
+            self.last_batch = batch
         if "benchmark_begin" not in self.state:
             return
-        if self.stop_batch is not None and batch >= self.stop_batch and self.time_per_step is None:
-            self.state["benchmark_end"] = time.time()
-            num_steps = batch - self.start_batch + 1
-            if num_steps > 0:
-                self.time_per_step = (
-                    self.state["benchmark_end"] - self.state["benchmark_begin"]
-                ) / num_steps
+        self.state["benchmark_end"] = time.time()
+        num_steps = self.last_batch - self.state["actual_start_batch"] + 1
+        if num_steps > 0:
+            self.time_per_step = (
+                self.state["benchmark_end"] - self.state["benchmark_begin"]
+            ) / num_steps
 
     def on_train_batch_begin(self, batch, logs=None):
-        if batch == self.start_batch:
+        if batch >= self.start_batch:
+            self.state["actual_start_batch"] = batch
             self.state["benchmark_begin"] = time.time()
 
     def on_train_batch_end(self, batch, logs=None):
         self._maybe_finalize(batch)
 
     def on_predict_batch_begin(self, batch, logs=None):
-        if batch == self.start_batch:
+        if batch >= self.start_batch:
+            self.state["actual_start_batch"] = batch
             self.state["benchmark_begin"] = time.time()
 
     def on_predict_batch_end(self, batch, logs=None):
         self._maybe_finalize(batch)
 
     def on_train_end(self, logs=None):
-        if self.time_per_step is None and "benchmark_begin" in self.state and self.last_batch is not None:
-            self.state["benchmark_end"] = time.time()
-            num_steps = self.last_batch - self.start_batch + 1
-            if num_steps > 0:
-                self.time_per_step = (
-                    self.state["benchmark_end"] - self.state["benchmark_begin"]
-                ) / num_steps
+        self._maybe_finalize(batch=None)
 
     def on_predict_end(self, logs=None):
-        if self.time_per_step is None and "benchmark_begin" in self.state and self.last_batch is not None:
-            self.state["benchmark_end"] = time.time()
-            num_steps = self.last_batch - self.start_batch + 1
-            if num_steps > 0:
-                self.time_per_step = (
-                    self.state["benchmark_end"] - self.state["benchmark_begin"]
-                ) / num_steps
+        self._maybe_finalize(batch=None)
 
 
 def fit(model, dataset):
