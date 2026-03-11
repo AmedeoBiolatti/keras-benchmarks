@@ -7,58 +7,52 @@ import benchmark
 
 
 class BenchmarkMetricsCallback(keras.callbacks.Callback):
-    def __init__(self, start_batch=1):
+    def __init__(self, start_batch=1, end_batch=None, ignore_first_epoch=True):
         super().__init__()
         self.start_batch = start_batch
+        self.end_batch = end_batch
+        self.ignore_first_epoch = ignore_first_epoch
         self.state = {}
-        self.last_batch = None
-        self.time_per_step = None
+        self.memory = {}
 
-    def _maybe_finalize(self, batch):
-        if batch is not None:
-            self.last_batch = batch
-        if "benchmark_begin" not in self.state:
-            return
-        self.state["benchmark_end"] = time.time()
-        num_steps = self.last_batch - self.state["actual_start_batch"] + 1
-        if num_steps > 0:
-            self.time_per_step = (
-                self.state["benchmark_end"] - self.state["benchmark_begin"]
-            ) / num_steps
+    @property
+    def time_per_step(self):
+        total_steps = 0
+        total_dt = 0
+        for k, (steps, dt) in self.memory.items():
+            if k == 0 and self.ignore_first_epoch:
+                continue
+            total_steps += steps
+            total_dt += dt
+        return total_dt / total_steps if total_steps != 0 else -1.0
+
+    def _init(self):
+        self.state = {}
+
+    def _finish(self, epoch):
+        steps = 1 + self.state["actual_end_batch"] - self.state["actual_start_batch"]
+        dt = self.state["benchmark_end"] - self.state["benchmark_begin"]
+        self.memory[epoch] = (steps, dt)
 
     # train
-    def on_train_begin(self, logs=None):
-        self.state = {}
-        self.last_batch = None
-        self.time_per_step = None
-
     def on_train_batch_begin(self, batch, logs=None):
         if batch >= self.start_batch and "benchmark_begin" not in self.state:
             self.state["actual_start_batch"] = batch
-            self.state["benchmark_begin"] = time.time()
+            self.state["benchmark_begin"] = time.perf_counter()
 
     def on_train_batch_end(self, batch, logs=None):
-        self._maybe_finalize(batch)
+        if self.end_batch is None or batch <= self.end_batch:
+            self.state["actual_end_batch"] = batch
+            self.state["benchmark_end"] = time.perf_counter()
 
-    def on_train_end(self, logs=None):
-        self._maybe_finalize(batch=None)
+    def on_epoch_begin(self, epoch, logs=None):
+        self._init()
+
+    def on_epoch_end(self, epoch, logs=None):
+        self._finish(epoch)
 
     # predict
-    def on_predict_begin(self, logs=None):
-        self.state = {}
-        self.last_batch = None
-        self.time_per_step = None
-
-    def on_predict_batch_begin(self, batch, logs=None):
-        if batch >= self.start_batch and "benchmark_begin" not in self.state:
-            self.state["actual_start_batch"] = batch
-            self.state["benchmark_begin"] = time.time()
-
-    def on_predict_batch_end(self, batch, logs=None):
-        self._maybe_finalize(batch)
-
-    def on_predict_end(self, logs=None):
-        self._maybe_finalize(batch=None)
+    # TODO
 
 
 def fit(model, dataset, start_batch=None):
@@ -66,7 +60,7 @@ def fit(model, dataset, start_batch=None):
     callback = BenchmarkMetricsCallback(start_batch=start_batch)
     model.fit(
         dataset,
-        epochs=1,
+        epochs=2,
         steps_per_epoch=benchmark.NUM_STEPS,
         callbacks=[callback]
     )
@@ -105,9 +99,9 @@ def generate(model, batch_size, max_length):
 def use_jit():
     # Only use jit_compile=False when using torch backend.
     return not (
-        hasattr(keras, "version")
-        and keras.version().startswith("3.")
-        and keras.backend.backend() == "torch"
+            hasattr(keras, "version")
+            and keras.version().startswith("3.")
+            and keras.backend.backend() == "torch"
     )
 
 
@@ -117,7 +111,7 @@ def steps_per_execution():
 
 
 def get_train_dataset_for_text_classification(
-    preprocessor, batch_size, seq_len
+        preprocessor, batch_size, seq_len
 ):
     import tensorflow as tf
 
