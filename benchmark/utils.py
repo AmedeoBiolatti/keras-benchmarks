@@ -26,7 +26,6 @@ class BenchmarkMetricsCallback(keras.callbacks.Callback):
         return total_dt / total_steps if total_steps != 0 else -1.0
 
     def _init(self):
-        print("INIT!")
         self.state = {}
 
     def _finish(self, epoch):
@@ -55,9 +54,10 @@ class BenchmarkMetricsCallback(keras.callbacks.Callback):
     # TODO
 
 
-def fit(model, dataset, start_batch=None):
-    start_batch = (benchmark.NUM_STEPS // 10) if start_batch is None else start_batch
-    callback = BenchmarkMetricsCallback(start_batch=start_batch)
+def fit(model, dataset):
+    start_batch = int(benchmark.NUM_STEPS * 0.1)
+    end_batch = int(benchmark.NUM_STEPS * 0.9)
+    callback = BenchmarkMetricsCallback(start_batch=start_batch, end_batch=end_batch)
     model.fit(
         dataset,
         epochs=2,
