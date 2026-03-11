@@ -12,7 +12,6 @@ class BenchmarkMetricsCallback(keras.callbacks.Callback):
         self.start_batch = start_batch
         self.end_batch = end_batch
         self.ignore_first_epoch = ignore_first_epoch
-        self.state = {}
         self.memory = {}
 
     @property
@@ -27,6 +26,7 @@ class BenchmarkMetricsCallback(keras.callbacks.Callback):
         return total_dt / total_steps if total_steps != 0 else -1.0
 
     def _init(self):
+        print("INIT!")
         self.state = {}
 
     def _finish(self, epoch):
@@ -36,7 +36,7 @@ class BenchmarkMetricsCallback(keras.callbacks.Callback):
 
     # train
     def on_train_batch_begin(self, batch, logs=None):
-        if batch >= self.start_batch and "benchmark_begin" not in self.state:
+        if (batch >= self.start_batch) and ("benchmark_begin" not in self.state):
             self.state["actual_start_batch"] = batch
             self.state["benchmark_begin"] = time.perf_counter()
 
@@ -61,7 +61,7 @@ def fit(model, dataset, start_batch=None):
     model.fit(
         dataset,
         epochs=2,
-        steps_per_epoch=benchmark.NUM_STEPS,
+        # steps_per_epoch=benchmark.NUM_STEPS,
         callbacks=[callback]
     )
     return 1000.0 * callback.time_per_step
@@ -128,7 +128,7 @@ def get_train_dataset_for_text_classification(
         )
         .repeat()
         .batch(batch_size)
-        .take(benchmark.NUM_STEPS + 1)
+        .take(benchmark.NUM_STEPS)
     )
 
     # Force the dataset to cache into memory.
@@ -152,7 +152,7 @@ def get_train_dataset_for_text_gen(preprocessor, batch_size, seq_len):
         )
         .repeat()
         .batch(batch_size)
-        .take(benchmark.NUM_STEPS + 1)
+        .take(benchmark.NUM_STEPS)
     )
 
     # Force the dataset to cache into memory.
