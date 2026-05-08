@@ -8,6 +8,7 @@ import os
 import random
 import re
 import subprocess
+import sys
 import time
 from dataclasses import dataclass, asdict
 from pathlib import Path
@@ -20,11 +21,9 @@ MS_PER_STEP_REGEX = re.compile(r"([0-9]+(?:\.[0-9]+)?)\s*ms/step")
 
 @dataclass
 class RunSpec:
-    label: str  # baseline | branch
-    python_exe: str
+    jax_epoch_iterator: str
     bench_script: str
     rep: int
-    steps_per_execution: int
     batch_size: Optional[int] = None
 
 
@@ -41,8 +40,6 @@ class RunResult:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--baseline-python", required=True)
-    parser.add_argument("--branch-python", required=True)
     parser.add_argument("--bench-script", required=True)
     parser.add_argument(
         "--repo-root",
@@ -51,7 +48,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--output-dir", default="bench_outputs")
     parser.add_argument("--reps", type=int, default=5)
-    parser.add_argument("--steps-per-execution", default="1,8,32,128")
+    parser.add_argument("--jax-epoch-iterator", default="defulat,threaded")
     parser.add_argument("--backend", default="jax")
     parser.add_argument("--timeout-s", type=int, default=0)
     parser.add_argument("--shuffle", action="store_true")
@@ -132,10 +129,10 @@ def parse_ms_per_step(stdout: str) -> float:
     return float(matches[-1])
 
 
-def make_env(backend: str, steps_per_execution: int, repo_root: str) -> dict[str, str]:
+def make_env(backend: str, jax_epoch_iterator: str, repo_root: str) -> dict[str, str]:
     env = os.environ.copy()
     env["KERAS_BACKEND"] = backend
-    env["KERAS_STEPS_PER_EXECUTION"] = str(steps_per_execution)
+    env["JAX_EPOCH_ITERATOR"] = jax_epoch_iterator
 
     # Make import resolution robust even if a script is launched incorrectly.
     existing_pythonpath = env.get("PYTHONPATH", "")
@@ -165,12 +162,12 @@ def run_one(
     log_dir.mkdir(parents=True, exist_ok=True)
 
     bench_out = output_dir / (
-        f"{spec.label}_spe{spec.steps_per_execution}_rep{spec.rep}.txt"
+        f"{spec.jax_epoch_iterator}_rep{spec.rep}.txt"
     )
 
     bench_module = script_path_to_module(spec.bench_script, repo_root)
     cmd = [
-        spec.python_exe,
+        sys.executable,
         "-m",
         bench_module,
         str(bench_out),
@@ -180,7 +177,7 @@ def run_one(
 
     env = make_env(
         backend=backend,
-        steps_per_execution=spec.steps_per_execution,
+        jax_epoch_iterator=spec.jax_epoch_iterator,
         repo_root=repo_root,
     )
 
@@ -197,7 +194,7 @@ def run_one(
     )
     t1 = time.perf_counter()
 
-    stem = f"{spec.label}_spe{spec.steps_per_execution}_rep{spec.rep}"
+    stem = f"{spec.jax_epoch_iterator}_rep{spec.rep}"
     (log_dir / f"{stem}.stdout").write_text(proc.stdout, encoding="utf-8")
     (log_dir / f"{stem}.stderr").write_text(proc.stderr, encoding="utf-8")
 
@@ -228,8 +225,6 @@ def save_jsonl(path: Path, row: dict[str, Any]) -> None:
 def main() -> None:
     args = parse_args()
 
-    ensure_file(args.baseline_python)
-    ensure_file(args.branch_python)
     ensure_file(args.bench_script)
     ensure_dir(args.repo_root)
 
@@ -238,9 +233,19 @@ def main() -> None:
 
     jsonl_path = output_dir / "runs.jsonl"
 
-    spe_values = [int(x.strip()) for x in args.steps_per_execution.split(",") if x.strip()]
-    if not spe_values:
-        raise ValueError("No valid steps_per_execution values provided.")
+    iterator_values = [
+        x.strip() for x in args.jax_epoch_iterator.split(",") if x.strip()
+    ]
+    if not iterator_values:
+        raise ValueError("No valid jax_epoch_iterator values provided.")
+    valid_iterator_values = {"default", "defulat", "threaded"}
+    invalid_iterator_values = sorted(set(iterator_values) - valid_iterator_values)
+    if invalid_iterator_values:
+        raise ValueError(
+            "Invalid jax_epoch_iterator values: "
+            + ", ".join(invalid_iterator_values)
+            + ". Expected one or more of: default, defulat, threaded."
+        )
 
     timeout_s = None if args.timeout_s <= 0 else args.timeout_s
 
@@ -248,41 +253,27 @@ def main() -> None:
     specs: list[RunSpec] = []
 
     for rep in range(args.reps):
-        rep_spe = list(spe_values)
+        rep_iterators = list(iterator_values)
         if args.shuffle:
-            rng.shuffle(rep_spe)
+            rng.shuffle(rep_iterators)
 
-        for spe in rep_spe:
-            pair = [
+        for jax_epoch_iterator in rep_iterators:
+            specs.append(
                 RunSpec(
-                    label="baseline",
-                    python_exe=args.baseline_python,
+                    jax_epoch_iterator=jax_epoch_iterator,
                     bench_script=args.bench_script,
                     rep=rep,
-                    steps_per_execution=spe,
-                    batch_size=args.batch_size
-                ),
-                RunSpec(
-                    label="branch",
-                    python_exe=args.branch_python,
-                    bench_script=args.bench_script,
-                    rep=rep,
-                    steps_per_execution=spe,
-                    batch_size=args.batch_size
-                ),
-            ]
-            if args.shuffle:
-                rng.shuffle(pair)
-            specs.extend(pair)
+                    batch_size=args.batch_size,
+                )
+            )
 
     all_results: list[RunResult] = []
     for spec in specs:
-        name = f"{spec.label}_spe{spec.steps_per_execution}_rep{spec.rep}"
+        name = f"{spec.jax_epoch_iterator}_rep{spec.rep}"
         config = {
-            "label": spec.label,
+            "jax_epoch_iterator": spec.jax_epoch_iterator,
             "rep": spec.rep,
-            "steps_per_execution": spec.steps_per_execution,
-            "python_exe": spec.python_exe,
+            "python_exe": sys.executable,
             "bench_script": spec.bench_script,
             "backend": args.backend,
             "repo_root": args.repo_root,
@@ -314,8 +305,8 @@ def main() -> None:
             "wall_s": result.wall_s,
             "ms_per_step": result.ms_per_step,
             "returncode": result.returncode,
-            "stdout_log": str(output_dir / "logs" / f"{spec.label}_spe{spec.steps_per_execution}_rep{spec.rep}.stdout"),
-            "stderr_log": str(output_dir / "logs" / f"{spec.label}_spe{spec.steps_per_execution}_rep{spec.rep}.stderr"),
+            "stdout_log": str(output_dir / "logs" / f"{spec.jax_epoch_iterator}_rep{spec.rep}.stdout"),
+            "stderr_log": str(output_dir / "logs" / f"{spec.jax_epoch_iterator}_rep{spec.rep}.stderr"),
             "stdout_tail": "\n".join(result.stdout.splitlines()[-50:]),
             "stderr_tail": "\n".join(result.stderr.splitlines()[-100:]),
         }
@@ -323,9 +314,8 @@ def main() -> None:
 
         wandb.log(
             {
-                "label": spec.label,
+                "jax_epoch_iterator": spec.jax_epoch_iterator,
                 "rep": spec.rep,
-                "steps_per_execution": spec.steps_per_execution,
                 "ok": int(result.ok),
                 "wall_s": result.wall_s,
                 "ms_per_step": result.ms_per_step if result.ms_per_step is not None else math.nan,
@@ -335,29 +325,39 @@ def main() -> None:
 
     summary_payload: dict[str, Any] = {}
 
-    for spe in spe_values:
-        baseline_vals = [
+    for jax_epoch_iterator in iterator_values:
+        vals = [
             r.ms_per_step
             for r in all_results
-            if r.ok and r.spec.label == "baseline" and r.spec.steps_per_execution == spe and r.ms_per_step is not None
-        ]
-        branch_vals = [
-            r.ms_per_step
-            for r in all_results
-            if r.ok and r.spec.label == "branch" and r.spec.steps_per_execution == spe and r.ms_per_step is not None
+            if r.ok
+            and r.spec.jax_epoch_iterator == jax_epoch_iterator
+            and r.ms_per_step is not None
         ]
 
-        baseline_stats = summarize(baseline_vals)
-        branch_stats = summarize(branch_vals)
+        stats = summarize(vals)
 
-        for k, v in baseline_stats.items():
-            summary_payload[f"baseline/spe_{spe}/{k}"] = v
-        for k, v in branch_stats.items():
-            summary_payload[f"branch/spe_{spe}/{k}"] = v
+        for k, v in stats.items():
+            summary_payload[f"{jax_epoch_iterator}/{k}"] = v
 
-        if baseline_stats["n"] > 0 and branch_stats["n"] > 0:
-            summary_payload[f"speedup/spe_{spe}/median"] = baseline_stats["median"] / branch_stats["median"]
-            summary_payload[f"speedup/spe_{spe}/mean"] = baseline_stats["mean"] / branch_stats["mean"]
+    baseline_iterator = "defulat" if "defulat" in iterator_values else "default"
+    if {baseline_iterator, "threaded"}.issubset(set(iterator_values)):
+        default_stats = {
+            k.removeprefix(f"{baseline_iterator}/"): v
+            for k, v in summary_payload.items()
+            if k.startswith(f"{baseline_iterator}/")
+        }
+        threaded_stats = {
+            k.removeprefix("threaded/"): v
+            for k, v in summary_payload.items()
+            if k.startswith("threaded/")
+        }
+        if default_stats["n"] > 0 and threaded_stats["n"] > 0:
+            summary_payload[f"speedup/threaded_over_{baseline_iterator}/median"] = (
+                default_stats["median"] / threaded_stats["median"]
+            )
+            summary_payload[f"speedup/threaded_over_{baseline_iterator}/mean"] = (
+                default_stats["mean"] / threaded_stats["mean"]
+            )
 
     print(
         json.dumps(
