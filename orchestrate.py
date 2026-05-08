@@ -339,7 +339,7 @@ def main() -> None:
         for k, v in stats.items():
             summary_payload[f"{jax_epoch_iterator}/{k}"] = v
 
-    baseline_iterator = "defulat" if "defulat" in iterator_values else "default"
+    baseline_iterator = "default" if "default" in iterator_values else "default"
     if {baseline_iterator, "threaded"}.issubset(set(iterator_values)):
         default_stats = {
             k.removeprefix(f"{baseline_iterator}/"): v
