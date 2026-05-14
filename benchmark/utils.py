@@ -51,7 +51,22 @@ class BenchmarkMetricsCallback(keras.callbacks.Callback):
         self._finish(epoch)
 
     # predict
-    # TODO
+    def on_predict_begin(self, logs=None):
+        self._init()
+
+    def on_predict_batch_begin(self, batch, logs=None):
+        if (batch >= self.start_batch) and ("benchmark_begin" not in self.state):
+            self.state["actual_start_batch"] = batch
+            self.state["benchmark_begin"] = time.perf_counter()
+
+    def on_predict_batch_end(self, batch, logs=None):
+        if self.end_batch is None or batch <= self.end_batch:
+            self.state["actual_end_batch"] = batch
+            self.state["benchmark_end"] = time.perf_counter()
+
+    def on_predict_end(self, logs=None):
+        if "benchmark_begin" in self.state:
+            self._finish(0)
 
 
 def fit(model, dataset):
@@ -67,9 +82,11 @@ def fit(model, dataset):
     return 1000.0 * callback.time_per_step
 
 
-def predict(model, dataset, start_batch=None):
-    start_batch = (benchmark.NUM_STEPS // 10) if start_batch is None else start_batch
-    callback = BenchmarkMetricsCallback(start_batch=start_batch)
+def predict(model, dataset):
+    callback = BenchmarkMetricsCallback(
+        start_batch=0,
+        ignore_first_epoch=False,
+    )
     model.predict(dataset, callbacks=[callback])
     return 1000.0 * callback.time_per_step
 
