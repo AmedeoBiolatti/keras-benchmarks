@@ -18,6 +18,51 @@ import wandb
 
 MS_PER_STEP_REGEX = re.compile(r"([0-9]+(?:\.[0-9]+)?)\s*ms/step")
 
+BENCHMARK_LAUNCHER = r"""
+import runpy
+import sys
+
+
+def configure_data_parallel():
+    try:
+        import keras
+    except Exception as exc:
+        print(
+            f"Could not import Keras for distribution setup: {exc}",
+            file=sys.stderr,
+        )
+        return
+
+    distribution_api = getattr(keras, "distribution", None)
+    if distribution_api is None:
+        return
+
+    try:
+        if distribution_api.distribution() is not None:
+            return
+
+        devices = distribution_api.list_devices()
+        if len(devices) <= 1:
+            print(f"Keras DataParallel disabled; found {len(devices)} device.")
+            return
+
+        distribution_api.set_distribution(
+            distribution_api.DataParallel(devices=devices)
+        )
+        print(
+            "Keras DataParallel enabled across "
+            f"{len(devices)} devices: {devices}"
+        )
+    except Exception as exc:
+        print(f"Could not configure Keras DataParallel: {exc}", file=sys.stderr)
+
+
+bench_module = sys.argv[1]
+sys.argv = [bench_module, *sys.argv[2:]]
+configure_data_parallel()
+runpy.run_module(bench_module, run_name="__main__", alter_sys=True)
+"""
+
 
 @dataclass
 class RunSpec:
@@ -168,7 +213,8 @@ def run_one(
     bench_module = script_path_to_module(spec.bench_script, repo_root)
     cmd = [
         sys.executable,
-        "-m",
+        "-c",
+        BENCHMARK_LAUNCHER,
         bench_module,
         str(bench_out),
     ]
